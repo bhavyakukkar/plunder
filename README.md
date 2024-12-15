@@ -1,7 +1,15 @@
+# plunder
+
+Test:
+```sh
+lua demo.lua
+```
+
+Future Plans:
 ```sh
 # Run your project-file
 # No considerations (you can export audio by using plunder.export somewhere in the file)
-lua my-project
+lua my-project.lua
 
 # TODO Play your project-file
 # Some considerations:
