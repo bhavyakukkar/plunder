@@ -1,0 +1,13 @@
+[package]
+name = "plunder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hound = "3.5.1"
+itertools = "0.14.0"
+mlua = { version = "0.10.2", default-features = false, features = ["lua54", "module"] }
+web-audio-api = "1.1.0"
+
+[lib]
+crate-type = ["cdylib"]
