@@ -1,12 +1,8 @@
-[package]
-name = "plunder-draft"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["libplunder", "plugins/*"]
+resolver = "2"
 
-[dependencies]
-anyhow = { version = "1.0.95", features = ["backtrace"] }
-hound = "3.5.1"
-itertools = "0.14.0"
-mlua = { version = "0.10.2", features = ["lua54"] }
-rustysynth = "1.3.4"
-serde = "1.0.217"
+[workspace.package]
+authors = ["Bhavya <bhavyakukkar@gmail.com>"]
+edition = "2024"
+version = "0.1.0"
