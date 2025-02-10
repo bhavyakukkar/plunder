@@ -1,0 +1,19 @@
+[package]
+name = "sampler"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+keywords.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+libplunder.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+mlua.workspace = true
+
+symphonia = "0.5.4"
+duration-str = "0.12.0"

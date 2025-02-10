@@ -1,0 +1,23 @@
+[package]
+name = "package"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+keywords.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+mlua.workspace = true
+hound.workspace = true
+anyhow.workspace = true
+
+libplunder.workspace = true
+sampler.workspace = true
+parser1.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+name = "plunder"

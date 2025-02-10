@@ -1,0 +1,18 @@
+[package]
+name = "parser1"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+keywords.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+libplunder.workspace = true
+mlua.workspace = true
+itertools.workspace = true
+
+[dev-dependencies]
+sampler.workspace = true
