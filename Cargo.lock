@@ -197,11 +197,7 @@ name = "libplunder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytemuck",
- "hound",
- "itertools",
  "mlua",
- "rustysynth",
  "serde",
 ]
 
@@ -310,18 +306,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "package"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hound",
- "libplunder",
- "mlua",
- "parser1",
- "sampler",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -359,6 +343,18 @@ name = "pkg-config"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
+
+[[package]]
+name = "plunder"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hound",
+ "libplunder",
+ "mlua",
+ "parser1",
+ "sampler",
+]
 
 [[package]]
 name = "powerfmt"
@@ -414,12 +410,6 @@ name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
-
-[[package]]
-name = "rustysynth"
-version = "1.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "523310a56cc070bdd24d85d0c6b595d4eae53cfca155114381fcab1176b43da1"
 
 [[package]]
 name = "sampler"

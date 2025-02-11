@@ -1,9 +1,7 @@
 
-# plunder (workspace)
 [workspace]
-members = [
-  "crates/*"
-, "package"]
+members = ["crates/*"]
+
 
 [workspace.package]
 authors = ["Bhavya Kukkar <bhavyakukkar@gmail.com>"]
@@ -15,13 +13,14 @@ readme = "README.md"
 repository = "https://github.com/bhavyakukkar/plunder"
 version = "0.1.0"
 
-[workspace.dependencies]
-libplunder = { version = "0.1.0", path = "." }
 
-# Plunder
+[workspace.dependencies]
+# Plunder Core
+libplunder = { version = "0.1.0", path = "crates/libplunder" }
+
+# Plunder Packages
 sampler = { version = "0.1.0", path = "crates/sampler" }
 parser1 = { version = "0.1.0", path = "crates/parser1" }
-package = { version = "0.1.0", path = "package" }
 
 # Dependencies
 anyhow = { version = "1.0.95", features = ["backtrace"] }
@@ -30,9 +29,10 @@ serde = { version = "1.0.217", features = ["derive"] }
 hound = { version = "3.5.1" }
 itertools = "0.14.0"
 
-# libplunder (library)
+
+# Plunder package includes engine + sampler + parser1
 [package]
-name = "libplunder"
+name = "plunder"
 authors.workspace = true
 categories.workspace = true
 description.workspace = true
@@ -43,10 +43,13 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 mlua.workspace = true
-serde.workspace = true
 hound.workspace = true
-rustysynth = "1.3.4"
-bytemuck = { version = "1.21.0", features = ["must_cast"] }
-itertools.workspace = true
+anyhow.workspace = true
+
+libplunder.workspace = true
+sampler.workspace = true
+parser1.workspace = true
+
+[lib]
+crate-type = ["cdylib"]

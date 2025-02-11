@@ -1,7 +1,7 @@
 
 ## Build
 ```sh
-cargo build -p package --release
+cargo build -p plunder --release
 ```
 
 

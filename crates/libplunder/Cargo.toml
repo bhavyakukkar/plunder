@@ -1,5 +1,5 @@
 [package]
-name = "package"
+name = "libplunder"
 authors.workspace = true
 categories.workspace = true
 description.workspace = true
@@ -10,14 +10,6 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-mlua.workspace = true
-hound.workspace = true
 anyhow.workspace = true
-
-libplunder.workspace = true
-sampler.workspace = true
-parser1.workspace = true
-
-[lib]
-crate-type = ["cdylib"]
-name = "plunder"
+mlua.workspace = true
+serde.workspace = true
