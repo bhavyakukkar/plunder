@@ -52,6 +52,8 @@ render(
 --   { 8, bt.pause },
 -- }
 
+--- TODO
+-- if any of plunder functions return large output, invoke a pager
 
 --- TODO
 -- automate '   <====>   '

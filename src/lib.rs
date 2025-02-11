@@ -13,7 +13,7 @@ fn libplunder(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
     exports.set(
         "Debug",
-        lua.create_function(|lua, value| debug(lua, value, true))?,
+        lua.create_function(|lua, value| debug(lua, value))?,
     )?;
 
     exports.set("help", lua.create_function(help)?)?;
@@ -27,50 +27,63 @@ fn libplunder(lua: &Lua) -> LuaResult<LuaTable> {
     Ok(exports)
 }
 
-fn debug(lua: &Lua, value: LuaValue, top_level: bool) -> LuaResult<String> {
-    match value {
-        u @ LuaValue::UserData(_) => Ok(LuaUserDataRefMut::<Box<dyn std::fmt::Debug>>::from_lua(
-            u, lua,
-        )
-        .map(|debug| {
-            let s = format!("{debug:?}");
-            if top_level {
-                println!("DEBUG :: `{}`", s);
-            }
-            s
-        })
-        .unwrap_or("userdata of unknown type".to_string())),
+pub fn debug(lua: &Lua, value: LuaValue) -> LuaResult<String> {
+    use std::fmt::Write;
+    let mut s = String::new();
 
-        LuaValue::Table(ref t) => {
-            use std::fmt::Write;
-            let mut s = String::from("<table> with pairs: {");
-            t.pairs::<LuaValue, LuaValue>()
-                .try_for_each(|pair| -> LuaResult<_> {
-                    let (key, value) = pair?;
-                    write!(
-                        s,
-                        "\n\t+ `{}`: `{}`",
-                        debug(lua, key, false)?,
-                        debug(lua, value, false)?
-                    )
-                    .map_err(LuaError::runtime)?;
+    fn debug_rec(
+        lua: &Lua,
+        out: &mut String,
+        value: LuaValue,
+        inline: bool,
+        indent: usize,
+    ) -> std::fmt::Result {
+        if indent == 10 {
+            return out.write_str("<...>");
+        }
+
+        let indentify = |n| " ".repeat(4).repeat(n);
+        match value {
+            u @ LuaValue::UserData(_) => Ok(
+                match LuaUserDataRefMut::<Box<dyn std::fmt::Debug>>::from_lua(u, lua) {
+                    Ok(debug) => write!(out, "{debug:?}"),
+                    Err(_) => write!(out, "<userdata> of unknown type"),
+                }?,
+            ),
+
+            LuaValue::Table(ref t) => {
+                out.write_str("<table>: {")?;
+                t.pairs::<LuaValue, LuaValue>().try_for_each(|pair| {
+                    let (key, value) =
+                        pair.expect("since expecting LuaValue, this is not expected to fail");
+                    if inline {
+                        write!(out, " `")?;
+                    } else {
+                        write!(out, "\n{}`", indentify(indent + 1))?;
+                    }
+                    debug_rec(lua, out, key, indent >= 1, indent + 1)?;
+                    write!(out, "`: `")?;
+                    debug_rec(lua, out, value, indent >= 1, indent + 1)?;
+                    write!(out, "`{sep2}", sep2 = if inline { ", " } else { "," })?;
                     Ok(())
                 })?;
-            write!(s, "\nDEBUG :: }}").map_err(LuaError::runtime)?;
-            if top_level {
-                println!("DEBUG :: `{}`", s);
-            }
-            Ok(s)
-        }
 
-        v => {
-            let s = v.to_string()?;
-            if top_level {
-                println!("DEBUG :: `{}`", s);
+                if inline {
+                    write!(out, " }}")
+                } else {
+                    write!(out, "\n{}}}", indentify(indent))
+                }
             }
-            Ok(s)
+
+            v => match v.to_string() {
+                Ok(ref s) => out.write_str(s),
+                Err(_) => out.write_str(""),
+            },
         }
     }
+    debug_rec(lua, &mut s, value, false, 0).map_err(LuaError::runtime)?;
+    println!("DEBUG :: `{}`", s);
+    Ok(s)
 }
 
 pub struct LuaIterator {
