@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
+use log::{info, trace};
 use serde::Deserialize;
 use symphonia::{
     core::{
@@ -112,7 +113,8 @@ impl Sampler {
         let track = probed.format.default_track().unwrap();
         let mut decoder = get_codecs().make(&track.codec_params, &Default::default())?;
 
-        debug::print_tracks(probed.format.tracks());
+        // dont care about errors in printing info
+        _ = debug::print_tracks(probed.format.tracks());
 
         if read_entire {
             let mut samples = Vec::new();
@@ -226,12 +228,12 @@ impl Sampler {
                 }
 
                 if !self.backward {
-                    // println!("!! cursor at {cursor}, sample len is {}", samples.len());
+                    trace!("!! cursor at {cursor}, sample len is {}", samples.len());
                     if *cursor >= samples.len() {
                         return Ok(None);
                     }
                     *cursor += 1;
-                    print!("Outputting samples: {:?}", samples[*cursor - 1]);
+                    trace!("Outputting samples: {:?}", samples[*cursor - 1]);
                     Ok(Some(if !self.mute {
                         samples[*cursor - 1].clone()
                     } else {
@@ -272,10 +274,11 @@ impl Sampler {
                 } => todo!(),
             },
             AudioControls::Pause => {
+                info!("Pausing sample");
                 self.outputting = false;
             }
             AudioControls::Resume => {
-                println!("resuming");
+                info!("Resuming sample");
                 self.outputting = true;
             }
             AudioControls::Reverse => {
@@ -299,6 +302,9 @@ impl Sampler {
 }
 
 mod debug {
+    use std::fmt;
+
+    use log::info;
     use symphonia::core::{formats::Track, units::TimeBase};
 
     fn fmt_time(ts: u64, tb: TimeBase) -> String {
@@ -311,74 +317,81 @@ mod debug {
         format!("{}:{:0>2}:{:0>6.3}", hours, mins, secs)
     }
 
-    pub fn print_tracks(tracks: &[Track]) {
+    pub fn print_tracks(tracks: &[Track]) -> fmt::Result {
+        use fmt::Write;
+        let mut banner = String::new();
+
         if !tracks.is_empty() {
-            println!("|");
-            println!("| // Tracks //");
+            writeln!(banner, "\n|")?;
+            writeln!(banner, "| // Tracks //")?;
 
             for (idx, track) in tracks.iter().enumerate() {
                 let params = &track.codec_params;
 
-                print!("|     [{:0>2}] Codec:           ", idx + 1);
+                write!(banner, "|     [{:0>2}] Codec:           ", idx + 1)?;
 
                 if let Some(codec) = symphonia::default::get_codecs().get_codec(params.codec) {
-                    println!("{} ({})", codec.long_name, codec.short_name);
+                    writeln!(banner, "{} ({})", codec.long_name, codec.short_name)?;
                 } else {
-                    println!("Unknown (#{})", params.codec);
+                    writeln!(banner, "Unknown (#{})", params.codec)?;
                 }
 
                 if let Some(sample_rate) = params.sample_rate {
-                    println!("|          Sample Rate:     {}", sample_rate);
+                    writeln!(banner, "|          Sample Rate:     {}", sample_rate)?;
                 }
                 if params.start_ts > 0 {
                     if let Some(tb) = params.time_base {
-                        println!(
+                        writeln!(
+                            banner,
                             "|          Start Time:      {} ({})",
                             fmt_time(params.start_ts, tb),
                             params.start_ts
-                        );
+                        )?;
                     } else {
-                        println!("|          Start Time:      {}", params.start_ts);
+                        writeln!(banner, "|          Start Time:      {}", params.start_ts)?;
                     }
                 }
                 if let Some(n_frames) = params.n_frames {
                     if let Some(tb) = params.time_base {
-                        println!(
+                        writeln!(
+                            banner,
                             "|          Duration:        {} ({})",
                             fmt_time(n_frames, tb),
                             n_frames
-                        );
+                        )?;
                     } else {
-                        println!("|          Frames:          {}", n_frames);
+                        writeln!(banner, "|          Frames:          {}", n_frames)?;
                     }
                 }
                 if let Some(tb) = params.time_base {
-                    println!("|          Time Base:       {}", tb);
+                    writeln!(banner, "|          Time Base:       {}", tb)?;
                 }
                 if let Some(padding) = params.delay {
-                    println!("|          Encoder Delay:   {}", padding);
+                    writeln!(banner, "|          Encoder Delay:   {}", padding)?;
                 }
                 if let Some(padding) = params.padding {
-                    println!("|          Encoder Padding: {}", padding);
+                    writeln!(banner, "|          Encoder Padding: {}", padding)?;
                 }
                 if let Some(sample_format) = params.sample_format {
-                    println!("|          Sample Format:   {:?}", sample_format);
+                    writeln!(banner, "|          Sample Format:   {:?}", sample_format)?;
                 }
                 if let Some(bits_per_sample) = params.bits_per_sample {
-                    println!("|          Bits per Sample: {}", bits_per_sample);
+                    writeln!(banner, "|          Bits per Sample: {}", bits_per_sample)?;
                 }
                 if let Some(channels) = params.channels {
-                    println!("|          Channel(s):      {}", channels.count());
-                    println!("|          Channel Map:     {}", channels);
+                    writeln!(banner, "|          Channel(s):      {}", channels.count())?;
+                    writeln!(banner, "|          Channel Map:     {}", channels)?;
                 }
                 if let Some(channel_layout) = params.channel_layout {
-                    println!("|          Channel Layout:  {:?}", channel_layout);
+                    writeln!(banner, "|          Channel Layout:  {:?}", channel_layout)?;
                 }
                 if let Some(language) = &track.language {
-                    println!("|          Language:        {}", language);
+                    writeln!(banner, "|          Language:        {}", language)?;
                 }
             }
         }
+        info!("{}", banner);
+        Ok(())
     }
 }
 

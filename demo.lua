@@ -52,10 +52,6 @@ render(
 --   { 8, bt.pause },
 -- }
 
---- TODO
--- 1. add env_logger
--- 2. split repo root package into instrument/engine crates and put into /crates; have the crate in
--- /package instead be the repo root package
 
 --- TODO
 -- automate '   <====>   '

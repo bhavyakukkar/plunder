@@ -1,10 +1,11 @@
-use mlua::{prelude::*, serde::Deserializer};
-use serde::de::DeserializeOwned;
 use std::{
     fmt::{self, Display},
     marker::PhantomData,
     sync::{Arc, RwLock},
 };
+
+use mlua::{prelude::*, serde::Deserializer};
+use serde::de::DeserializeOwned;
 
 use crate::{Sample, SharedPtr};
 

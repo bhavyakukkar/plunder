@@ -28,7 +28,8 @@ mlua = { version = "0.10.2", features = ["lua54", "serialize", "module"] }
 serde = { version = "1.0.217", features = ["derive"] }
 hound = { version = "3.5.1" }
 itertools = "0.14.0"
-
+env_logger = "0.11.6"
+log = "0.4.25"
 
 # Plunder package includes engine + sampler + parser1
 [package]
@@ -43,13 +44,14 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-mlua.workspace = true
-hound.workspace = true
-anyhow.workspace = true
-
 libplunder.workspace = true
 sampler.workspace = true
 parser1.workspace = true
+
+mlua.workspace = true
+hound.workspace = true
+anyhow.workspace = true
+env_logger.workspace = true
 
 [lib]
 crate-type = ["cdylib"]

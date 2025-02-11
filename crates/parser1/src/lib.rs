@@ -1,6 +1,7 @@
 use std::str::Chars;
 
 use libplunder::is_event;
+use log::{info, trace};
 use mlua::prelude::*;
 
 pub struct Parser(pub(crate) Option<ParseTable>);
@@ -70,7 +71,7 @@ impl ParseTable {
     }
 
     pub fn parse(&self, pattern_str: &[char]) -> LuaResult<Vec<(usize, LuaValue)>> {
-        println!("default-parser now parsing {:?}", pattern_str);
+        info!("default-parser now parsing {:?}", pattern_str);
 
         match self {
             ParseTable::Map(map) => {
@@ -81,7 +82,7 @@ impl ParseTable {
                         if let Some(pattern_end) =
                             string_match(pattern_str, read, key.chars(), false)
                         {
-                            println!("matched '{}', pushing at {}", key, read);
+                            trace!("matched '{}', pushing at {}", key, read);
                             match emit {
                                 _ if is_event(emit) => {
                                     emit_map.push((read, emit.clone()));

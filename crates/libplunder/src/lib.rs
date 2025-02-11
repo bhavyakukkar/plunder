@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::anyhow;
 use instrument::{EmittableUserData, PackagedInstrument, SourceError};
+use log::{info, trace};
 
 pub mod instrument;
 
@@ -87,7 +88,7 @@ pub fn combine_i32(samples: &[Sample]) -> anyhow::Result<Option<Vec<i32>>> {
                     .iter()
                     .enumerate()
                     .map(|(i, c)| {
-                        println!("adding {} to channel {i}", f(c));
+                        trace!("adding {} to channel {i}", f(c));
                         sum.get_mut(i)
                             .map(|si| *si = si.saturating_add(f(c)))
                             .ok_or(anyhow!("channel inconsistency"))
@@ -100,7 +101,7 @@ pub fn combine_i32(samples: &[Sample]) -> anyhow::Result<Option<Vec<i32>>> {
                         .iter()
                         .enumerate()
                         .map(|(i, c)| {
-                            println!("adding {} to channel {i}", f(c));
+                            trace!("adding {} to channel {i}", f(c));
                             f(c)
                         })
                         .collect(),
@@ -238,7 +239,7 @@ pub struct Engine<I> {
     next_event: Option<(usize, EmittableUserData)>,
     index: usize,
     interval: usize,
-    max_interval: usize,
+    unit_interval: usize,
     duration: usize,
 }
 
@@ -263,10 +264,10 @@ where
     /// Return<Option<_>> and just transpose it in the Iterator implementation
     /// It is the job of the caller to stop iterating when empty samples are being returned. This only returns None once all instruments have been exhausted
     fn next_inner(&mut self) -> Result<Option<Vec<Sample>>, EngineError> {
-        if (self.index as u128) * (self.max_interval as u128) >= self.duration as u128 {
+        if (self.index as u128) * (self.unit_interval as u128) >= self.duration as u128 {
             return Ok(None);
         }
-        if self.interval >= self.max_interval - 1 {
+        if self.interval >= self.unit_interval - 1 {
             // Emit all events set to the current index and then proceed generating samples
             loop {
                 match self.next_event {
@@ -276,7 +277,7 @@ where
                             //
                             // There might be more events at the same unit so don't advance to the
                             // next unit yet
-                            println!(">> Reached next-event at i:`{}`", self.index);
+                            trace!(">> Reached next-event at i:`{}`", self.index);
                             next_event
                                 .1
                                  .0
@@ -301,10 +302,10 @@ where
                             .map_err(EngineError::EventStream)?;
                         if self.next_event.is_none() {
                             // `event_stream` returned None, i.e. it has been exhausted
-                            // println!(">> Event-stream exhausted");
+                            trace!(">> Event-stream exhausted");
                             break;
                         }
-                        println!(
+                        trace!(
                             ">> Popped next next-event with i:`{}`",
                             self.next_event.as_ref().unwrap().0
                         );
@@ -318,7 +319,7 @@ where
             self.interval += 1;
         }
 
-        println!(">> At index {}", self.index);
+        trace!(">> At index {}", self.index);
         let mut samples = None;
         for instrument in &self.instruments {
             let sample = instrument
@@ -381,17 +382,20 @@ where
     pub fn new(
         instruments: Vec<PackagedInstrument>,
         event_stream: I,
-        max_interval: usize,
+        unit_interval: usize,
         sample_bound: usize,
     ) -> Self {
-        println!("max-interval:`{max_interval}`");
+        info!(
+            "Engine created: interval:`{unit_interval}`, instruments:`{num_instruments}`, sample_bound:`{sample_bound}`",
+            num_instruments = instruments.len(),
+        );
         Engine {
             instruments,
             event_stream,
             next_event: None,
             index: 0,
-            interval: max_interval,
-            max_interval,
+            interval: unit_interval,
+            unit_interval,
             duration: sample_bound,
         }
     }

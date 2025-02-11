@@ -13,6 +13,7 @@ version.workspace = true
 libplunder.workspace = true
 mlua.workspace = true
 itertools.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 sampler.workspace = true

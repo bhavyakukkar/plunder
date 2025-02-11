@@ -8,6 +8,8 @@ use sampler::Sampler;
 
 #[mlua::lua_module]
 fn libplunder(lua: &Lua) -> LuaResult<LuaTable> {
+    env_logger::init();
+
     let exports = lua.create_table()?;
     exports.set(
         "Debug",
