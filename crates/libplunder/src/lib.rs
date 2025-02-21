@@ -11,15 +11,21 @@ use instrument::{EmittableUserData, PackagedInstrument, SourceError};
 use log::{info, trace};
 
 pub mod instrument;
+pub mod instrument_and_event;
 
 pub mod prelude {
     pub mod instrument {
         pub use crate::{
             instrument::{
-                package_instrument, /* Emittable, */ EmittableUserData, Instrument,
-                PackagedInstrument, Source, SourceError, State,
+                package_instrument, Emit, EmittableUserData, Instrument, PackagedInstrument,
+                SharedPlunderInstrument, Source, SourceError, State, ToPlunderInstrument,
             },
             is_event, Sample,
+        };
+
+        pub use crate::instrument_and_event::{
+            DownInstrumentDownEvent, DownInstrumentUpEvent, InstrumentAndEvent,
+            UpInstrumentDownEvent, UpInstrumentUpEvent,
         };
     }
 
@@ -230,7 +236,7 @@ impl Hash for Sample {
 //     B32(i32),
 // }
 
-type SharedPtr<T> = Arc<RwLock<T>>;
+pub type SharedPtr<T> = Arc<RwLock<T>>;
 
 #[derive(Debug)]
 pub struct Engine<I> {
@@ -245,13 +251,14 @@ pub struct Engine<I> {
 
 impl<I> Engine<I>
 where
-    I: Iterator<Item = mlua::Result<(usize, EmittableUserData)>>,
+    I: Iterator<Item = (usize, EmittableUserData)>,
 {
     fn _next_write(&mut self, _sample: &mut Sample) -> Result<(), EngineError> {
         todo!()
     }
 
-    // TODO over here
+    // TODO: make this less complex by replacing self.event_stream and self.next_event with a single peekable event-stream
+    //
     // this iterator can "end" in 3 different ways:
     //   1. event-stream runs out
     //   2. instruments run out
@@ -288,18 +295,16 @@ where
                             // Empty `next_event` so another event can be popped from the
                             // `event_stream`
                             self.next_event = None;
-                        } else {
+                        } else if next_event.0 > self.index {
                             // Unit of `next_event` still not reached, advance 1 unit and try again
                             break;
+                        } else {
+                            return Err(EngineError::UnsortedEventStream);
                         }
                     }
                     None => {
                         // Pop the next event in `event_stream` into `next_event`
-                        self.next_event = self
-                            .event_stream
-                            .next()
-                            .transpose()
-                            .map_err(EngineError::EventStream)?;
+                        self.next_event = self.event_stream.next();
                         if self.next_event.is_none() {
                             // `event_stream` returned None, i.e. it has been exhausted
                             trace!(">> Event-stream exhausted");
@@ -324,8 +329,7 @@ where
         for instrument in &self.instruments {
             let sample = instrument
                 .factory
-                .write()
-                .unwrap() // TODO don't unwrap here
+                .0
                 .next_sample()
                 .map_err(EngineError::Source)?;
 
@@ -353,20 +357,24 @@ where
 
 #[derive(Debug)]
 pub enum EngineError {
-    EventStream(mlua::Error),
     Emit(String),
     Source(SourceError<String>),
+    UnsortedEventStream,
 }
 
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "engine error")
+        match self {
+            EngineError::Emit(err) => write!(f, "emit error: {err}"),
+            EngineError::Source(err) => write!(f, "source error: {err}"),
+            EngineError::UnsortedEventStream => write!(f, "unsorted-event-stream received"),
+        }
     }
 }
 
 impl<I> Iterator for Engine<I>
 where
-    I: Iterator<Item = mlua::Result<(usize, EmittableUserData)>>,
+    I: Iterator<Item = (usize, EmittableUserData)>,
 {
     type Item = Result<Vec<Sample>, EngineError>;
 
@@ -377,7 +385,7 @@ where
 
 impl<I> Engine<I>
 where
-    I: Iterator<Item = mlua::Result<(usize, EmittableUserData)>>,
+    I: Iterator<Item = (usize, EmittableUserData)>,
 {
     pub fn new(
         instruments: Vec<PackagedInstrument>,

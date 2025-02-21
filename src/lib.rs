@@ -1,10 +1,18 @@
-use std::hash::{DefaultHasher, Hasher};
+use std::{
+    cmp::Ordering,
+    iter::{Map, Peekable},
+};
 
-use anyhow::Context;
-use libplunder::{combine_i32, prelude::instrument::*, Engine};
+use itertools::Itertools;
+use libplunder::prelude::instrument::*;
+use log::{info, warn};
+use midi::{MidiParser, Synth};
 use mlua::prelude::*;
 use parser1::Parser;
+use render::EventStreamPair;
 use sampler::Sampler;
+
+mod render;
 
 #[mlua::lua_module]
 fn libplunder(lua: &Lua) -> LuaResult<LuaTable> {
@@ -24,7 +32,23 @@ fn libplunder(lua: &Lua) -> LuaResult<LuaTable> {
 
     exports.set("Parser", lua.create_function(|_, _: ()| Ok(Parser::new()))?)?;
 
+    exports.set("Synth", Synth::package(lua)?)?;
+
+    exports.set("Midi", lua.create_function(midi_parser)?)?;
+
     Ok(exports)
+}
+
+pub fn midi_parser(lua: &Lua, instrument: LuaValue) -> LuaResult<MidiParser> {
+    if !instrument
+        .as_userdata()
+        .is_some_and(|userdata| userdata.is::<PackagedInstrument>())
+    {
+        warn!("passed value to Midi is not Userdata containing PackagedInstrument");
+    }
+    Ok(MidiParser::new(
+        LuaUserDataRef::<PackagedInstrument>::from_lua(instrument, lua)?.clone(),
+    ))
 }
 
 pub fn debug(lua: &Lua, value: LuaValue) -> LuaResult<String> {
@@ -86,6 +110,61 @@ pub fn debug(lua: &Lua, value: LuaValue) -> LuaResult<String> {
     Ok(s)
 }
 
+/// An iterator that takes a collection of iterators assumed to be sorted and a fallible function to
+/// order their items, and yields another iterator that returns the items from the two iterators sorted **in
+/// ascending-order**
+pub struct SortIterator<I, E>
+where
+    I: Iterator,
+{
+    its: Vec<Peekable<I>>,
+    // a: Peekable<I>,
+    // b: Peekable<I>,
+    cmp: fn(&I::Item, &I::Item) -> Result<Ordering, E>,
+}
+
+impl<I, E> SortIterator<I, E>
+where
+    I: Iterator,
+{
+    pub fn new(its: Vec<I>, cmp: fn(&I::Item, &I::Item) -> Result<Ordering, E>) -> Self {
+        let its = its.into_iter().map(I::peekable).collect();
+        SortIterator { its, cmp }
+    }
+}
+
+impl<I, E> Iterator for SortIterator<I, E>
+where
+    I: Iterator,
+{
+    type Item = Result<I::Item, E>;
+
+    fn next(&mut self) -> Option<Result<I::Item, E>> {
+        let mut next_id = None;
+        {
+            let mut next_elem = None;
+            for (it_id, it) in self.its.iter_mut().enumerate() {
+                (next_id, next_elem) = match (next_id, next_elem, it.peek()) {
+                    (None, None, None) => (None, None),
+                    (None, None, Some(new)) => (Some(it_id), Some(new)),
+                    (Some(i), Some(next), None) => (Some(i), Some(next)),
+                    (Some(i), Some(next), Some(new)) => match (self.cmp)(next, new) {
+                        Ok(Ordering::Less | Ordering::Equal) => (Some(i), Some(next)),
+                        Ok(Ordering::Greater) => (Some(it_id), Some(new)),
+                        Err(e) => {
+                            return Some(Err(e));
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+            }
+        }
+        next_id
+            .and_then(|i| self.its.get_mut(i).unwrap().next())
+            .map(|next| Ok(next))
+    }
+}
+
 pub struct LuaIterator {
     iter: LuaFunction,
     obj: LuaValue,
@@ -126,94 +205,75 @@ impl Iterator for LuaIterator {
     }
 }
 
-pub fn render<'a>(
-    _lua: &'a Lua,
-    (path, instruments, interval, sample_bound, event_stream): (
+// type SortIteratorAccumulator<I> = Result<SortIterator<I>, Option<I>>;
+// fn empty_sort_iterator_accumulator<I>() -> SortIteratorAccumulator<I>
+// where
+//     I: Iterator,
+// {
+//     Err(None)
+// }
+
+pub fn render(
+    _lua: &Lua,
+    (path, instruments, bitrate, interval, sample_bound, event_streams): (
         String,
         Vec<LuaUserDataRef<PackagedInstrument>>,
+        u32,
         usize,
         usize,
-        (LuaFunction, LuaValue, LuaValue),
+        LuaTable,
+        // (LuaFunction, LuaValue, LuaValue),
     ),
 ) -> LuaResult<()> {
-    use std::hash::Hash;
     use std::ops::Deref;
 
-    let engine = Engine::new(
-        instruments
-            .iter()
-            .map(|instrument| (*instrument).clone())
-            .collect(),
-        LuaIterator::from(event_stream).map(|item| {
-            let item = item?;
-            let table = item.as_table().ok_or(LuaError::runtime(
-                "expected event-stream to be an iterator that yields events, which are tables",
-            ))?;
-            let idx = table.get(1)?;
-            let event: LuaUserDataRef<EmittableUserData> = table.get(2)?;
-            Ok((idx, event.deref().clone()))
-        }),
-        interval,
-        sample_bound,
-    );
-
-    let mut hasher = DefaultHasher::new();
-    let mut samples = engine.map(|i| match i {
-        Ok(i) => match combine_i32(&i) {
-            Ok(Some(s)) => {
-                // for si in &s {
-                //     print!("{si} ");
-                // }
-                // println!();
-                s.hash(&mut hasher);
-                Some(Ok(s))
-            }
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
-        },
-        Err(err) => Some(Err(anyhow::anyhow!("engine error: {err}"))),
-    });
-
-    let first_sample = samples
-        .next()
-        .unwrap()
-        // We unwrap the Option that combine_i32 returns because we will have no information about
-        // the number of channels if the first sample is empty
-        .unwrap()
-        .unwrap();
-
-    let num_channels = first_sample.len();
-    println!("num of channels: `{num_channels}`");
-    let spec = hound::WavSpec {
-        channels: num_channels as u16,
-        sample_rate: 44100,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Int,
-    };
-
-    let mut writer = hound::WavWriter::create(path, spec).unwrap();
-    first_sample
-        .iter()
-        .map(|s| writer.write_sample(*s))
-        .collect::<Result<(), _>>()
-        .unwrap();
-    samples
-        .map(|s| {
-            s.transpose()?
-                // because we received the number of channels from that first-sample, we can replace future empty samples with a collection of empty samples in each channel
-                .unwrap_or(vec![0; num_channels])
-                .iter()
-                .map(|s| writer.write_sample(*s))
-                .collect::<Result<(), _>>()
-                .context("wav write error")
+    // Collection of event-streams, each of which yields LuaResult<(usize, EmittableUserData)>
+    let valid_event_streams: Vec<_> = event_streams
+        .pairs::<LuaValue, LuaTable>()
+        .map(|pair| -> LuaResult<_> {
+            let (_name, event_stream) = pair?;
+            let event_stream_fun: LuaFunction = event_stream.get(1)?;
+            let event_stream_obj: LuaValue = event_stream.get(2)?;
+            let event_stream_init: LuaValue = event_stream.get(3)?;
+            Ok(
+                LuaIterator::from((event_stream_fun, event_stream_obj, event_stream_init)).map(
+                    |item| -> LuaResult<EventStreamPair> {
+                        let item = item?;
+                        let table = item.as_table().ok_or(LuaError::runtime(
+                            "expected event-stream to be an iterator \
+                            that yields events, which are tables",
+                        ))?;
+                        let idx = table.get(1)?;
+                        let event: LuaUserDataRef<EmittableUserData> = table.get(2)?;
+                        info!("Popped next even in sorted event stream with id: `{idx}`");
+                        Ok((idx, event.deref().clone()))
+                    },
+                ),
+            )
         })
-        .collect::<Result<(), _>>()
-        .unwrap();
+        .collect::<Result<Vec<Map<_, _>>, _>>()?;
 
-    writer.finalize().unwrap();
-
-    println!("hash: {}", hasher.finish());
-    Ok(())
+    SortIterator::new(valid_event_streams, |event_a, event_b| -> LuaResult<_> {
+        Ok(event_a
+            .as_ref()
+            .map_err(LuaError::clone)?
+            .0
+            .cmp(&event_b.as_ref().map_err(LuaError::clone)?.0))
+    })
+    .map(|next| match next {
+        Ok(next) => next,
+        Err(e) => Err(e),
+    })
+    .process_results(|sorted_event_stream| {
+        render::render_single_event_stream(
+            path,
+            instruments,
+            sorted_event_stream,
+            bitrate,
+            interval,
+            sample_bound,
+        )
+    })
 }
 
 pub fn help(lua: &Lua, value: LuaValue) -> LuaResult<()> {

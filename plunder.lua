@@ -1,3 +1,4 @@
+---@diagnostic disable: lowercase-global
 local plunder = {}
 
 -- import libplunder.so
@@ -17,20 +18,25 @@ else
   return (1)
 end
 
+---@generic T: table, V
+---@alias event_stream_iter [fun(table: V[], i?: integer):integer, V, T, integer]
+
 ---
----Render the given set of `instruments` with the given `event-stream iterator` by spacing each unit with `interval` no. of samples and stopping after `duration` no. of samples
+---Render the given set of `instruments` with the given `event-stream iterator` by spacing each unit with `interval` no. of samples and stopping after `duration` no. of samples. Write as .wav to `path`
 ---
 ---@generic T: table, V
 ---@param path string
 ---@param instruments table
+---@param bitrate integer
 ---@param interval integer
 ---@param duration integer
----@param event_stream_fun fun(table: V[], i?: integer):integer, V
----@param event_stream_obj T
----@param event_stream_initial_value integer
-plunder.render  = function(path, instruments, interval, duration, event_stream_fun, event_stream_obj,
-                           event_stream_initial_value)
-  libplunder.render(path, instruments, interval, duration, event_stream_fun, event_stream_obj, event_stream_initial_value)
+---@param event_streams table<any, event_stream_iter>
+plunder.render  = function(path, instruments, bitrate, interval, duration, event_streams)
+  return libplunder.render(path, instruments, bitrate, interval, duration, event_streams)
+end
+
+plunder.walk    = function(value)
+  return { ipairs(value) }
 end
 
 ---@param value any
@@ -41,14 +47,28 @@ plunder.Debug   = function(value) libplunder.Debug(value) end
 
 plunder.Sampler = libplunder.Sampler
 plunder.Parser  = libplunder.Parser
+plunder.Synth   = libplunder.Synth
+plunder.Midi    = libplunder.Midi
 
 ---
 ---Add all plunder items to the global scope
 ---
 plunder.global  = function()
-  for key, val in pairs(plunder) do
-    _G[key] = val
-  end
+  -- core
+  _G.render = plunder.render
+
+  -- instruments
+  _G.Sampler = plunder.Sampler
+  _G.Synth = plunder.Synth
+
+  -- parsers
+  _G.Parser = plunder.Parser
+  _G.Midi = plunder.Midi
+
+  -- utils
+  _G.Debug = plunder.Debug
+  _G.help = plunder.help
+  _G.walk = plunder.walk
 end
 
 return plunder

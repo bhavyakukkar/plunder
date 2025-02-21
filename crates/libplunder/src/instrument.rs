@@ -1,4 +1,5 @@
 use std::{
+    any::{self, Any},
     fmt::{self, Display},
     marker::PhantomData,
     sync::{Arc, RwLock},
@@ -7,7 +8,21 @@ use std::{
 use mlua::{prelude::*, serde::Deserializer};
 use serde::de::DeserializeOwned;
 
-use crate::{Sample, SharedPtr};
+use crate::{
+    instrument_and_event::{DownInstrumentDownEvent, InstrumentAndEvent},
+    Sample, SharedPtr,
+};
+
+// fn magic<T, A, E>(before: SharedPtr<T>) -> SharedPtr<dyn PlunderInstrument>
+// where
+//     T: Instrument<A, E> + 'static,
+//     E: DeserializeOwned + 'static,
+//     A: 'static,
+// {
+//     Arc::new(RwLock::new(ToPlunderInstrument::from(
+//         before.into_inner().unwrap(),
+//     )))
+// }
 
 // pub trait IntoSource<'a> {
 //     type S: Source;
@@ -19,6 +34,18 @@ use crate::{Sample, SharedPtr};
 pub enum SourceError<E> {
     Fatal(E),
     Once(E),
+}
+
+impl<E> fmt::Display for SourceError<E>
+where
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SourceError::Fatal(err) => write!(f, "once emit error: {err}"),
+            SourceError::Once(err) => write!(f, "once emit error: {err}"),
+        }
+    }
 }
 
 impl<E> SourceError<E> {
@@ -38,6 +65,30 @@ pub trait Source {
     fn next_sample(&mut self) -> Result<Option<Sample>, SourceError<Self::Err>>;
 }
 
+// TODO: it is ok to impl Source for SharedPtr<T: Source>, but change the Err assoc-type to a union that includes error that occurred is rwlock poisoned
+// impl Source for SharePtr of Source
+// impl<T> Source for SharedPtr<T>
+// where
+//     T: Source,
+// {
+//     type Err = T::Err;
+
+//     fn next_sample(&mut self) -> Result<Option<Sample>, SourceError<Self::Err>> {
+//         self.write().unwrap().next_sample()
+//     }
+// }
+
+// impl Source for RwLock of Source
+// impl<T> Source for RwLock<T>
+// where
+//     T: Source,
+// {
+//     type Err = T::Err;
+//     fn next_sample(&mut self) -> Result<Option<Sample>, SourceError<Self::Err>> {
+//         self.write().unwrap().next_sample()
+//     }
+// }
+
 pub trait State<A, E> {
     type TErr: Display;
     type IErr: Display;
@@ -46,6 +97,46 @@ pub trait State<A, E> {
     where
         Self: Sized;
 }
+
+// impl State for SharePtr of State
+// impl<T, A, E> State<A, E> for SharedPtr<T>
+// where
+//     T: State<A, E>,
+// {
+//     type TErr = T::TErr;
+//     type IErr = T::IErr;
+
+//     fn transform(&mut self, event: E) -> Result<(), Self::TErr> {
+//         self.write().unwrap().transform(event)
+//     }
+
+//     fn initialize(route: &str, arguments: A) -> Result<Self, Self::IErr>
+//     where
+//         Self: Sized,
+//     {
+//         T::initialize(route, arguments).map(|state| Arc::new(RwLock::new(state)))
+//     }
+// }
+
+// impl State for RwLock of State
+// impl<T, A, E> State<A, E> for RwLock<T>
+// where
+//     T: State<A, E>,
+// {
+//     type TErr = T::TErr;
+//     type IErr = T::IErr;
+
+//     fn transform(&mut self, event: E) -> Result<(), Self::TErr> {
+//         self.write().unwrap().transform(event)
+//     }
+
+//     fn initialize(route: &str, arguments: A) -> Result<Self, Self::IErr>
+//     where
+//         Self: Sized,
+//     {
+//         T::initialize(route, arguments).map(|state| RwLock::new(state))
+//     }
+// }
 
 #[derive(Debug)]
 pub enum InstrumentError {
@@ -64,22 +155,53 @@ impl Display for InstrumentError {
     }
 }
 
-pub(crate) trait PlunderInstrument: fmt::Debug {
-    fn next_sample(&mut self) -> Result<Option<Sample>, SourceError<String>>;
-    fn transform(&mut self, lua_value: LuaValue) -> Result<(), InstrumentError>;
+/// A hidden trait for Instruments that is less fancier than [`Instrument`](Instrument) and is dyn-compatible
+///
+/// NOTE: PlunderInstrument should only be implemented for shared-pointers to Instruments
+/// This makes it less tedious to downcast as the origin instrument in [`InstrumentAndEvent`](InstrumentAndEvent)
+pub trait PlunderInstrument: fmt::Debug + Any + Sync + Send {
+    fn next_sample(&self) -> Result<Option<Sample>, SourceError<String>>;
+    fn transform(&self, lua_value: LuaValue) -> Result<(), InstrumentError>;
     fn help(&self) -> String;
 }
 
-/// An Instrument is any pairing of a [sample-source](Source) and a [State machine](State)
+/// An Instrument is any pairing of a [sample-source](Source) and a [state-machine](State)
 pub trait Instrument<A, E>: State<A, E> + Source {
     fn help(&self) -> String;
 }
 
-pub struct ToPlunderInstrument<A, E, T>(T, PhantomData<(A, E)>);
+// impl Instrument for SharedPtr of Instrument
+// impl<T, A, E> Instrument<A, E> for SharedPtr<T>
+// where
+//     T: Instrument<A, E>,
+// {
+//     fn help(&self) -> String {
+//         self.read().unwrap().help()
+//     }
+// }
 
-impl<A, E, T> From<T> for ToPlunderInstrument<A, E, T> {
-    fn from(value: T) -> Self {
-        ToPlunderInstrument(value, PhantomData)
+// impl Instrument for RwLock of Instrument
+// impl<T, A, E> Instrument<A, E> for RwLock<T>
+// where
+//     T: Instrument<A, E>,
+// {
+//     fn help(&self) -> String {
+//         self.read().unwrap().help()
+//     }
+// }
+
+/// A wrapper for an [`Instrument`](Instrument) to make it dyn-compatible
+pub struct ToPlunderInstrument<A, E, T> {
+    pub(crate) instrument: SharedPtr<T>,
+    p: PhantomData<(A, E)>,
+}
+
+impl<A, E, T> From<SharedPtr<T>> for ToPlunderInstrument<A, E, T> {
+    fn from(instrument: SharedPtr<T>) -> Self {
+        ToPlunderInstrument {
+            instrument,
+            p: PhantomData,
+        }
     }
 }
 
@@ -89,21 +211,54 @@ where
     T: Instrument<A, E>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.help())
+        // write!(f, "{}", self.instrument.help())
+        write!(f, "ToPlunderInstrument( {} )", any::type_name::<T>())
     }
 }
 
+// impl<A, E, T> PlunderInstrument for ToPlunderInstrument<A, E, T, InstrumentMarker>
+// where
+//     E: DeserializeOwned,
+//     T: Instrument<A, E>,
+// {
+//     fn next_sample(&mut self) -> Result<Option<Sample>, SourceError<String>> {
+//         self.instrument
+//             .next_sample()
+//             .map_err(|err| err.to_string_error())
+//     }
+
+//     fn transform(&mut self, lua_value: LuaValue) -> Result<(), InstrumentError> {
+//         self.instrument
+//             .transform(
+//                 E::deserialize(Deserializer::new(lua_value))
+//                     .map_err(InstrumentError::DeserializationError)?,
+//             )
+//             .map_err(|err| InstrumentError::Custom(err.to_string()))
+//     }
+
+//     fn help(&self) -> String {
+//         self.instrument.help()
+//     }
+// }
+
 impl<A, E, T> PlunderInstrument for ToPlunderInstrument<A, E, T>
 where
-    E: DeserializeOwned,
-    T: Instrument<A, E>,
+    A: Send + Sync + 'static,
+    E: DeserializeOwned + Send + Sync + 'static,
+    T: Instrument<A, E> + Send + Sync + 'static,
 {
-    fn next_sample(&mut self) -> Result<Option<Sample>, SourceError<String>> {
-        self.0.next_sample().map_err(|err| err.to_string_error())
+    fn next_sample(&self) -> Result<Option<Sample>, SourceError<String>> {
+        self.instrument
+            .write()
+            .unwrap()
+            .next_sample()
+            .map_err(|err| err.to_string_error())
     }
 
-    fn transform(&mut self, lua_value: LuaValue) -> Result<(), InstrumentError> {
-        self.0
+    fn transform(&self, lua_value: LuaValue) -> Result<(), InstrumentError> {
+        self.instrument
+            .write()
+            .unwrap()
             .transform(
                 E::deserialize(Deserializer::new(lua_value))
                     .map_err(InstrumentError::DeserializationError)?,
@@ -112,9 +267,23 @@ where
     }
 
     fn help(&self) -> String {
-        self.0.help()
+        self.instrument.read().unwrap().help()
     }
 }
+
+// impl PlunderInstrument for SharedPtr<dyn PlunderInstrument> {
+//     fn next_sample(&mut self) -> Result<Option<Sample>, SourceError<String>> {
+//         self.write().unwrap().next_sample()
+//     }
+
+//     fn transform(&mut self, lua_value: LuaValue) -> Result<(), InstrumentError> {
+//         self.write().unwrap().transform(lua_value)
+//     }
+
+//     fn help(&self) -> String {
+//         self.write().unwrap().help()
+//     }
+// }
 
 // impl<A, E, T> PlunderInstrument for ToPlunderInstrument<A, E, T>
 // where
@@ -245,52 +414,195 @@ where
 //     }
 // }
 
-// Discuss whether to have this be in rust or just a transparent table in lua
-// pub type InstrumentAndEvent<const S: usize, E, T> = (SharedPtr<T>, E, PhantomData<>);
-#[derive(Debug)]
-pub(crate) struct InstrumentAndEvent {
-    instrument: SharedPtr<dyn PlunderInstrument>,
-    event: LuaValue,
+pub trait Emit {
+    fn emit(&mut self) -> Result<(), String>;
+    fn instrument_help(&self) -> String;
 }
 
-impl InstrumentAndEvent {
-    pub fn emit(&mut self) -> Result<(), String> {
+/*
+impl<T, A, E> Emit for InstrumentAndEvent2<SharedPtr<T>, A, E, E>
+where
+    E: Clone,
+    T: Instrument<A, E>,
+{
+    type Err = T::TErr;
+
+    fn emit(&mut self) -> Option<T::TErr> {
         self.instrument
             .write()
-            .map_err(|_| "concurrency error accessing PackagedInstrument".to_string())?
+            .unwrap()
             .transform(self.event.clone())
-            .map_err(|err| err.to_string())
-    }
-
-    fn help(&mut self) -> String {
-        self.instrument.write().unwrap().help()
+            .err()
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct EmittableUserData(pub(crate) SharedPtr<InstrumentAndEvent>);
+impl<T, A, E> Emit for InstrumentAndEvent2<SharedPtr<T>, A, E, LuaValue>
+where
+    T: Instrument<A, E>,
+{
+    type Err = T::TErr;
+
+    fn emit(&mut self) -> Option<T::TErr> {
+        self.0.write().unwrap().transform(self.1.clone()).err()
+    }
+}*/
+// Discuss whether to have this be in rust or just a transparent table in lua
+// pub type InstrumentAndEvent<const S: usize, E, T> = (SharedPtr<T>, E, PhantomData<>);
+// #[derive(Debug)]
+// pub struct InstrumentAndEvent {
+//     instrument: SharedPtr<dyn PlunderInstrument>,
+//     event: LuaValue,
+// }
+
+type PlunderInstrumentAndEvent =
+    InstrumentAndEvent<SharedPlunderInstrument, (), (), LuaValue, DownInstrumentDownEvent>;
+
+// #[derive(Debug)]
+// pub struct ToInstrumentAndEvent<'a, T, A, E> {
+//     pub instrument: T,
+//     pub event: E,
+//     pub lua: &'a Lua,
+//     p: PhantomData<A>,
+// }
+
+// impl<'a, T, A, E> ToInstrumentAndEvent<'a, T, A, E> {
+//     pub fn new(instrument: T, event: E, lua: &'a Lua) -> Self {
+//         ToInstrumentAndEvent {
+//             instrument,
+//             event,
+//             lua,
+//             p: PhantomData,
+//         }
+//     }
+// }
+
+// impl<'a, T, A, E> TryFrom<ToInstrumentAndEvent<'a, T, A, E>> for PlunderInstrumentAndEvent
+// where
+//     A: 'static,
+//     E: serde::Serialize + DeserializeOwned + 'static,
+//     T: Instrument<A, E> + 'static,
+// {
+//     type Error = LuaError;
+//     fn try_from(value: ToInstrumentAndEvent<T, A, E>) -> Result<Self, Self::Error> {
+//         Ok(PlunderInstrumentAndEvent {
+//             instrument: Arc::new(RwLock::new(ToPlunderInstrument::from(value.instrument))),
+//             event: value
+//                 .event
+//                 .serialize(mlua::serde::Serializer::new(value.lua))?,
+//             p: PhantomData,
+//         })
+//     }
+// }
+
+/*pub struct InstrumentAndEventBuilder<T, A, E> {
+    instrument: Option<SharedPtr<T>>,
+    event: LuaValue,
+    d: PhantomData<A>,
+}
+
+pub enum InstrumentAndEventBuilderError {
+    NoInstrument,
+    NoEvent,
+}
+
+impl<T, A, E> InstrumentAndEventBuilder<T, A, E> {
+    fn new() -> Self {
+        InstrumentAndEventBuilder {
+            instrument: None,
+            event: None,
+            d: PhantomData,
+        }
+    }
+
+    fn instrument(self, instrument: SharedPtr<T>) -> Self {
+        InstrumentAndEventBuilder {
+            instrument: Some(instrument),
+            ..self
+        }
+    }
+
+    fn event(self, event: E) -> Self {
+        InstrumentAndEventBuilder {
+            event: Some(event),
+            ..self
+        }
+    }
+
+    fn build(self) -> Result<InstrumentAndEvent, InstrumentAndEventBuilderError>
+    where
+        E: DeserializeOwned,
+        T: Instrument<A, E>,
+    {
+        Ok(InstrumentAndEvent {
+            instrument: self
+                .instrument
+                .ok_or(InstrumentAndEventBuilderError::NoInstrument)?,
+            event: self.event.ok_or(InstrumentAndEventBuilderError::NoEvent)?,
+        })
+    }
+}*/
+
+// impl PlunderInstrumentAndEvent {
+//     pub fn emit(&mut self) -> Result<(), String> {
+//         // check if maybe self.event is actually UserData
+//         // self.event.as_userdata().map(|ud| LuaUserDataRef<usize>)
+//         self.instrument
+//             .0
+//             .write()
+//             .map_err(|_| "concurrency error accessing PackagedInstrument".to_string())?
+//             .transform(self.event.clone())
+//             .map_err(|err| err.to_string())
+//     }
+
+//     fn help(&mut self) -> String {
+//         self.instrument.0.write().unwrap().help()
+//     }
+// }
+
+#[derive(Clone)]
+pub struct EmittableUserData(pub SharedPtr<dyn Emit>);
 impl EmittableUserData {
     pub fn help(&self) -> String {
-        self.0.write().unwrap().help()
+        self.0.write().unwrap().instrument_help()
     }
 }
 
+impl fmt::Debug for EmittableUserData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.read().unwrap().instrument_help())
+    }
+}
+
+impl<T> From<T> for EmittableUserData
+where
+    T: Emit + 'static,
+{
+    fn from(value: T) -> Self {
+        EmittableUserData(Arc::new(RwLock::new(value)))
+    }
+}
+
+// impl From<PlunderInstrumentAndEvent> for EmittableUserData {
+//     fn from(value: PlunderInstrumentAndEvent) -> Self {
+//         EmittableUserData(Arc::new(RwLock::new(value)))
+//     }
+// }
+
 impl LuaUserData for EmittableUserData {}
+
+#[derive(Debug, Clone)]
+pub struct SharedPlunderInstrument(pub Arc<dyn PlunderInstrument + Send + Sync>);
 
 // obj (instrument type from class erased)
 #[derive(Debug, Clone)]
 pub struct PackagedInstrument {
-    pub(crate) factory: SharedPtr<dyn PlunderInstrument>,
+    pub factory: SharedPlunderInstrument,
     pub manual: Arc<str>,
 }
 
 impl Display for PackagedInstrument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.factory.write().map_err(|_| fmt::Error)?.help()
-        )
+        write!(f, "{}", self.factory.0.help())
     }
 }
 
@@ -303,9 +615,9 @@ pub struct PackagedInstrumentFactory<A, E, T> {
 
 impl<A, E, T> LuaUserData for PackagedInstrumentFactory<A, E, T>
 where
-    A: DeserializeOwned + 'static,
-    E: DeserializeOwned + 'static,
-    T: Instrument<A, E> + 'static,
+    A: DeserializeOwned + Send + Sync + 'static,
+    E: DeserializeOwned + Send + Sync + 'static,
+    T: Instrument<A, E> + Send + Sync + 'static,
 {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(LuaMetaMethod::Index, |lua, this, key: LuaValue| {
@@ -319,10 +631,14 @@ where
                         A::deserialize(Deserializer::new(arguments))
                             .map_err(|err| LuaError::runtime(format!("\n~~~> plunder <~~~: Error while providing this value to the instrument: {err}")))?,
                     ) {
-                        Ok(instrument) => Ok(PackagedInstrument {
-                            factory: Arc::new(RwLock::new(ToPlunderInstrument::from(instrument))),
-                            manual: manual.clone(),
-                        }),
+                        Ok(instrument) => {
+                            let shared_instrument = Arc::new(ToPlunderInstrument::<A, E, T>::from(Arc::new(RwLock::new(instrument))));
+
+                            Ok(PackagedInstrument {
+                              factory: SharedPlunderInstrument(shared_instrument),
+                               manual: manual.clone(),
+                                                })
+                        },
                         Err(err) => Err(LuaError::runtime(format!("\n{err:#}"))),
                     }
                 },
@@ -336,18 +652,21 @@ where
     }
 }
 
+impl From<(&PackagedInstrument, LuaValue)> for EmittableUserData {
+    fn from((instrument, event): (&PackagedInstrument, LuaValue)) -> Self {
+        EmittableUserData(Arc::new(RwLock::new(PlunderInstrumentAndEvent {
+            instrument: instrument.factory.clone(),
+            event,
+            p: PhantomData,
+        })))
+    }
+}
+
 impl LuaUserData for PackagedInstrument {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(
             LuaMetaMethod::Index,
-            |_, this, event: LuaValue| -> LuaResult<EmittableUserData> {
-                Ok(EmittableUserData(Arc::new(RwLock::new(
-                    InstrumentAndEvent {
-                        instrument: this.factory.clone(),
-                        event,
-                    },
-                ))))
-            },
+            |_, this, event: LuaValue| -> LuaResult<EmittableUserData> { Ok((this, event).into()) },
         );
         // methods.add_meta_method(LuaMetaMethod::Call, |_, this, event: LuaValue| {
         //     Ok(InstrumentAndEvent {
@@ -360,9 +679,9 @@ impl LuaUserData for PackagedInstrument {
 
 pub fn package_instrument<T, A, E>(lua: &Lua, manual: String) -> LuaResult<LuaValue>
 where
-    A: DeserializeOwned + 'static,
-    E: DeserializeOwned + 'static,
-    T: Instrument<A, E> + 'static,
+    A: DeserializeOwned + Sync + Send + 'static,
+    E: DeserializeOwned + Sync + Send + 'static,
+    T: Instrument<A, E> + Sync + Send + 'static,
 {
     PackagedInstrumentFactory::<A, E, T> {
         manual: Arc::from(manual),

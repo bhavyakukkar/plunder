@@ -21,6 +21,7 @@ libplunder = { version = "0.1.0", path = "crates/libplunder" }
 # Plunder Packages
 sampler = { version = "0.1.0", path = "crates/sampler" }
 parser1 = { version = "0.1.0", path = "crates/parser1" }
+midi = { version = "0.1.0", path = "crates/midi"}
 
 # Dependencies
 anyhow = { version = "1.0.95", features = ["backtrace"] }
@@ -47,11 +48,14 @@ version.workspace = true
 libplunder.workspace = true
 sampler.workspace = true
 parser1.workspace = true
+midi.workspace = true
 
 mlua.workspace = true
 hound.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
+itertools.workspace = true
+log.workspace = true
 
 [lib]
 crate-type = ["cdylib"]

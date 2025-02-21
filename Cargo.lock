@@ -326,6 +326,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
+name = "midi"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libplunder",
+ "log",
+ "mlua",
+ "rustysynth",
+ "serde",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -460,7 +472,10 @@ dependencies = [
  "anyhow",
  "env_logger",
  "hound",
+ "itertools",
  "libplunder",
+ "log",
+ "midi",
  "mlua",
  "parser1",
  "sampler",
@@ -549,6 +564,12 @@ name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
+
+[[package]]
+name = "rustysynth"
+version = "1.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "523310a56cc070bdd24d85d0c6b595d4eae53cfca155114381fcab1176b43da1"
 
 [[package]]
 name = "sampler"
